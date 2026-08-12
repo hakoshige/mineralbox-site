@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>標本を受け取る - MineralBox</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0 auto;
+    padding: 48px 20px;
+    max-width: 34rem;
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+    line-height: 1.9;
+  }
+  h1 { font-size: 1.5rem; letter-spacing: 0.08em; margin-bottom: 0.2em; }
+  .lead { margin-top: 0; opacity: 0.75; }
+  .seller { opacity: 0.75; }
+  ol { padding-left: 1.2em; }
+  li { margin: 0.4em 0; }
+  .locality { opacity: 0.7; font-size: 0.9em; }
+  .note {
+    margin: 2em 0;
+    padding: 1em 1.2em;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    opacity: 0.9;
+  }
+  button {
+    font: inherit;
+    padding: 0.4em 1em;
+    border-radius: 4px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .link {
+    margin-top: 0.6em;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8em;
+    word-break: break-all;
+    opacity: 0.7;
+  }
+  footer { margin-top: 3em; font-size: 0.85rem; opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<h1>標本を受け取る</h1>
+<p class="lead" id="lead">読み込んでいます…</p>
+
+<div id="contents"></div>
+
+<div class="note">
+  <p><strong>MineralBox をインストールしたら、このページに戻ってきてください。</strong></p>
+  <p>アプリを入れただけでは、この標本のデータは運ばれません。インストールを終えてからもう一度このページを開くと、アプリが立ち上がって取り込みに進みます。ブラウザの履歴から開き直せます。</p>
+  <p><a href="https://play.google.com/store/apps/details?id=com.hakoshige.mineralbox">Google Play で MineralBox を入手する</a></p>
+</div>
+
+<p>
+  <button id="copy" type="button">このページのリンクをコピー</button>
+  <span id="copied" hidden>コピーしました</span>
+</p>
+<p class="lead">リンクを見失ったときは、アプリの「設定 → データ → テキストを貼り付けて取り込む」に貼り付けても取り込めます。</p>
+<p class="link" id="link"></p>
+
+<footer>
+  この情報はリンクの「#」より後ろに入っていて、サーバーには送られません。このページは通信も記録もしません。<br>
+  <a href="../index.html">MineralBox について</a> ・ <a href="../privacy-policy.html">プライバシーポリシー</a>
+</footer>
+
+<script>
+const RS = '\x1e';
+const US = '\x1f';
+const SUPPORTED_VERSION = 1;
+
+function fromBase64Url(text) {
+  const padded = text.replace(/-/g, '+').replace(/_/g, '/');
+  const binary = atob(padded + '='.repeat((4 - padded.length % 4) % 4));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function inflateRaw(bytes) {
+  const stream = new Blob([bytes]).stream()
+    .pipeThrough(new DecompressionStream('deflate-raw'));
+  return new TextDecoder('utf-8').decode(await new Response(stream).arrayBuffer());
+}
+
+async function decodeFragment(hash) {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const cut = raw.indexOf('.');
+  if (cut <= 0) return { error: 'notTransferCode' };
+
+  const version = Number(raw.slice(0, cut));
+  if (!Number.isInteger(version) || version < 1) return { error: 'notTransferCode' };
+  if (version > SUPPORTED_VERSION) return { error: 'newerVersion' };
+
+  let body;
+  try {
+    body = await inflateRaw(fromBase64Url(raw.slice(cut + 1)));
+  } catch (e) {
+    return { error: 'corrupt' };
+  }
+
+  const records = body.split(RS);
+  const head = records.shift().split(US);
+  // 項目は末尾にだけ増えるので、足りない位置は空として読む。
+  const at = (fields, i) => (i < fields.length ? fields[i] : '');
+  const specimens = records
+    .filter((r) => r.length > 0)
+    .map((r) => {
+      const f = r.split(US);
+      return { nameEn: at(f, 0), nameJa: at(f, 1), locality: at(f, 2) };
+    });
+
+  if (specimens.length === 0) return { error: 'empty' };
+
+  return {
+    part: Number(at(head, 0)) || 1,
+    total: Number(at(head, 1)) || 1,
+    sellerName: at(head, 2),
+    specimens: specimens,
+  };
+}
+
+const MESSAGES = {
+  notTransferCode: 'このリンクには標本の情報が入っていません。売り手が出したQRコードをもう一度読み取ってください。',
+  newerVersion: 'このリンクは新しい版で作られています。MineralBox を最新にすると読めます。',
+  corrupt: 'リンクが途中で切れているようです。売り手にもう一度QRコードを出してもらってください。',
+  empty: 'このリンクには標本が1点も入っていません。',
+  unsupported: 'このブラウザでは中身を表示できませんでしたが、アプリでは取り込めます。',
+};
+
+function render(result) {
+  const lead = document.getElementById('lead');
+  const contents = document.getElementById('contents');
+
+  if (result.error) {
+    lead.textContent = MESSAGES[result.error] || MESSAGES.notTransferCode;
+    return;
+  }
+
+  const count = result.specimens.length;
+  lead.textContent = result.total > 1
+    ? `${count} 点が入っています（全 ${result.total} 枚のうち ${result.part} 枚目）。`
+    : `${count} 点が入っています。`;
+
+  if (result.sellerName) {
+    const seller = document.createElement('p');
+    seller.className = 'seller';
+    seller.textContent = `売り手: ${result.sellerName}`;
+    contents.appendChild(seller);
+  }
+
+  const list = document.createElement('ol');
+  for (const s of result.specimens) {
+    const li = document.createElement('li');
+    li.textContent = s.nameJa || s.nameEn || '(名称なし)';
+    if (s.locality) {
+      const locality = document.createElement('div');
+      locality.className = 'locality';
+      locality.textContent = s.locality;
+      li.appendChild(locality);
+    }
+    list.appendChild(li);
+  }
+  contents.appendChild(list);
+
+  if (result.total > 1) {
+    const note = document.createElement('p');
+    note.className = 'lead';
+    note.textContent = '残りの枚のQRコードも読み取ると、アプリが全部をまとめて取り込みます。';
+    contents.appendChild(note);
+  }
+}
+
+document.getElementById('link').textContent = location.href;
+
+document.getElementById('copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(location.href);
+  } catch (e) {
+    return;
+  }
+  const copied = document.getElementById('copied');
+  copied.hidden = false;
+  setTimeout(() => { copied.hidden = true; }, 4000);
+});
+
+if (typeof DecompressionStream === 'undefined') {
+  render({ error: 'unsupported' });
+} else {
+  decodeFragment(location.hash).then(render).catch(() => render({ error: 'corrupt' }));
+}
+</script>
+
+</body>
+</html>
