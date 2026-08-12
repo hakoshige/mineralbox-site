@@ -36,13 +36,6 @@
     color: inherit;
     cursor: pointer;
   }
-  .link {
-    margin-top: 0.6em;
-    font-family: ui-monospace, monospace;
-    font-size: 0.8em;
-    word-break: break-all;
-    opacity: 0.7;
-  }
   footer { margin-top: 3em; font-size: 0.85rem; opacity: 0.6; }
 </style>
 </head>
@@ -64,7 +57,6 @@
   <span id="copied" hidden>コピーしました</span>
 </p>
 <p class="lead">リンクを見失ったときは、アプリの「設定 → データ → テキストを貼り付けて取り込む」に貼り付けても取り込めます。</p>
-<p class="link" id="link"></p>
 
 <footer>
   この情報はリンクの「#」より後ろに入っていて、サーバーには送られません。このページは通信も記録もしません。<br>
@@ -178,8 +170,9 @@ function render(result) {
   }
 }
 
-document.getElementById('link').textContent = location.href;
-
+// リンクは画面に出さない。標本の情報が入っているぶん 900 字近くになり、
+// 読めない文字列の壁が出ると、ページが壊れているように見える。
+// 受け渡しはコピーのボタンだけで足りる。
 document.getElementById('copy').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(location.href);
